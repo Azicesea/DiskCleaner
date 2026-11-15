@@ -1,5 +1,83 @@
 using System.Diagnostics;
+using DiskCleaner.Core.Clean;
 using DiskCleaner.Core.Scan;
+
+var mode = args.Length > 0 ? args[0] : "scan";
+
+if (mode == "selftest-recycle")
+{
+    var dir = Path.Combine(Path.GetTempPath(), "diskcleaner-selftest");
+    Directory.CreateDirectory(dir);
+    var files = new List<string>();
+    for (var i = 0; i < 3; i++)
+    {
+        var f = Path.Combine(dir, $"t{i}.txt");
+        File.WriteAllText(f, new string('x', 100 * 1024));
+        files.Add(f);
+    }
+
+    var before = DiskCleaner.Core.Interop.ShellInterop.QueryRecycleBin(null);
+    Console.WriteLine($"回收站(前): {before.Size:N0} bytes, {before.Items:N0} 项");
+
+    var failed = DiskCleaner.Core.Interop.ShellInterop.DeleteToRecycleBin(files);
+    var after = DiskCleaner.Core.Interop.ShellInterop.QueryRecycleBin(null);
+
+    Console.WriteLine($"删除失败数: {failed}");
+    Console.WriteLine($"文件还在吗: {files.Count(f => File.Exists(f))}/{files.Count}（应为 0/3）");
+    Console.WriteLine($"回收站(后): {after.Size:N0} bytes, {after.Items:N0} 项（应 +3 项）");
+
+    Directory.Delete(dir, true);
+    return;
+}
+
+if (mode == "clean")
+{
+    var dryRun = args.Contains("--dry");
+    Console.WriteLine(dryRun ? "清理自检（dry-run，不删任何东西）" : "清理自检（真实执行）");
+    Console.WriteLine();
+
+    var sw = Stopwatch.StartNew();
+    var items = CleanScanner.Scan(DefaultRules.All,
+        new Progress<CleanScanProgress>(p =>
+        {
+            if (!string.IsNullOrEmpty(p.CurrentRule))
+                Console.WriteLine($"  扫描中: {p.CurrentRule}");
+        }));
+
+    Console.WriteLine($"扫描耗时 {sw.ElapsedMilliseconds} ms");
+    Console.WriteLine();
+    long totalSize = 0;
+    var totalCount = 0;
+    foreach (var it in items)
+    {
+        totalSize += it.Size;
+        totalCount += it.FileCount;
+        var state = it.State switch
+        {
+            CleanItemState.Ready => "OK  ",
+            CleanItemState.NotApplicable => "N/A ",
+            CleanItemState.Failed => "FAIL",
+            _ => "    ",
+        };
+        Console.WriteLine($"{state} {it.Size / 1048576.0,10:F1} MB  {it.FileCount,8:N0} 文件  {it.Name}" +
+                          (it.Problem is null ? "" : $"  ({it.Problem})"));
+    }
+    Console.WriteLine();
+    Console.WriteLine($"合计: {totalSize / 1073741824.0:F2} GB, {totalCount:N0} 文件");
+
+    if (args.Contains("--run"))
+    {
+        Console.WriteLine();
+        Console.WriteLine("执行清理（缓存类直接删，回收站项跳过）...");
+        var ids = items.Where(i => i.CanClean && i.Kind != CleanRuleKind.RecycleBin).Select(i => i.RuleId).ToArray();
+        Console.WriteLine("选中: " + string.Join(", ", ids));
+        var outcome = CleanExecutor.Execute(DefaultRules.All, ids, null, default, dryRun: dryRun);
+        Console.WriteLine($"删除 {outcome.FilesDeleted:N0} 个文件, 释放 {outcome.BytesFreed / 1073741824.0:F2} GB, 失败 {outcome.FilesFailed:N0}");
+        if (outcome.Problem != null) Console.WriteLine("问题: " + outcome.Problem);
+    }
+
+    return;
+}
 
 var target = args.Length > 0 ? args[0] : @"E:\";
 Console.WriteLine($"扫描: {target}");

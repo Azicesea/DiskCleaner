@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
+using System.Text;
 using System.Windows;
+using DiskCleaner.Core.Clean;
 using DiskCleaner.Core.Models;
 using DiskCleaner.Core.Scan;
 
@@ -9,12 +12,14 @@ namespace DiskCleaner.App;
 public partial class MainWindow : Window
 {
     private readonly ObservableCollection<DirRow> _rows = new();
+    private readonly ObservableCollection<CleanRow> _cleanRows = new();
     private CancellationTokenSource? _cts;
 
     public MainWindow()
     {
         InitializeComponent();
         ResultGrid.ItemsSource = _rows;
+        CleanList.ItemsSource = _cleanRows;
         Loaded += MainWindow_Loaded;
     }
 
@@ -38,6 +43,8 @@ public partial class MainWindow : Window
         }
         if (DriveCombo.Items.Count > 0) DriveCombo.SelectedIndex = 0;
     }
+
+    // ================= 磁盘占用 =================
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
@@ -126,6 +133,169 @@ public partial class MainWindow : Window
         ScanProgressBar.IsIndeterminate = busy;
     }
 
+    // ================= 清理 =================
+
+    private async void CleanScanButton_Click(object sender, RoutedEventArgs e)
+    {
+        _cts = new CancellationTokenSource();
+        SetCleanBusy(true);
+        _cleanRows.Clear();
+        CleanStatusText.Text = "正在扫描可清理的内容…";
+
+        try
+        {
+            await ReloadCleanItemsAsync(_cts.Token);
+            var ready = _cleanRows.Where(r => r.Item.CanClean).ToList();
+            var total = ready.Sum(r => r.Size);
+            CleanStatusText.Text = ready.Count == 0
+                ? "没有找到可清理的内容"
+                : $"扫描完成：{ready.Count} 项可清理，共 {FormatSize(total)}";
+        }
+        catch (OperationCanceledException)
+        {
+            CleanStatusText.Text = "已取消";
+        }
+        catch (Exception ex)
+        {
+            CleanStatusText.Text = "扫描失败";
+            MessageBox.Show(this, ex.Message, "扫描失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _cts.Dispose();
+            _cts = null;
+            SetCleanBusy(false);
+            UpdateCleanSummary();
+        }
+    }
+
+    private async Task ReloadCleanItemsAsync(CancellationToken ct)
+    {
+        var progress = new Progress<CleanScanProgress>(p =>
+        {
+            if (!string.IsNullOrEmpty(p.CurrentRule))
+                CleanStatusText.Text = $"正在扫描：{p.CurrentRule}（{p.Done + 1}/{p.Total}）";
+        });
+
+        var items = await Task.Run(() => CleanScanner.Scan(DefaultRules.All, progress, ct), ct);
+        var previouslyChecked = _cleanRows
+            .Where(r => r.IsChecked)
+            .Select(r => r.Item.RuleId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hadRows = _cleanRows.Count > 0;
+
+        _cleanRows.Clear();
+        foreach (var item in items)
+        {
+            var rule = DefaultRules.All.First(r => r.Id == item.RuleId);
+            var row = new CleanRow
+            {
+                Item = item,
+                Rule = rule,
+                IsChecked = hadRows
+                    ? previouslyChecked.Contains(item.RuleId)
+                    : DefaultRules.DefaultChecked(rule),
+            };
+            row.PropertyChanged += (_, _) => UpdateCleanSummary();
+            _cleanRows.Add(row);
+        }
+    }
+
+    private async void CleanRunButton_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = _cleanRows.Where(r => r.IsChecked && r.Item.CanClean).ToList();
+        if (selected.Count == 0) return;
+
+        var total = selected.Sum(r => r.Size);
+        var toRecycle = RecycleCheck.IsChecked == true;
+        var hasRecycleBinItem = selected.Any(r => r.Item.Kind == CleanRuleKind.RecycleBin);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"即将清理 {selected.Count} 项，共约 {FormatSize(total)}：");
+        sb.AppendLine();
+        foreach (var r in selected) sb.AppendLine($"  · {r.Name}    {r.SizeText}");
+        sb.AppendLine();
+        sb.AppendLine(toRecycle
+            ? "删掉的文件会放进回收站，随时可以还原。"
+            : "这些都是缓存/临时文件，会被直接删除（用的时候自动重建）。");
+        if (hasRecycleBinItem)
+            sb.AppendLine("注意：勾选的「回收站」会彻底清空，这部分不可还原。");
+
+        var confirm = MessageBox.Show(this, sb.ToString(), "确认清理",
+            MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.OK) return;
+
+        _cts = new CancellationTokenSource();
+        SetCleanBusy(true);
+        CleanProgressBar.IsIndeterminate = false;
+        CleanProgressBar.Value = 0;
+        CleanProgressBar.Visibility = Visibility.Visible;
+
+        var ids = selected.Select(r => r.Item.RuleId).ToArray();
+        var progress = new Progress<CleanProgress>(p =>
+        {
+            CleanStatusText.Text =
+                $"正在清理：{p.CurrentRule}（{p.RulesDone}/{p.RulesTotal}）已处理 {p.FilesDone:N0} 个文件，{FormatSize(p.BytesDone)}";
+            CleanProgressBar.Value = p.RulesTotal == 0 ? 0 : p.RulesDone * 100.0 / p.RulesTotal;
+        });
+
+        try
+        {
+            var result = await Task.Run(() => CleanExecutor.Execute(
+                DefaultRules.All, ids, progress, _cts.Token, forceRecycleBin: toRecycle));
+
+            var summary = $"清理完成：删除 {result.FilesDeleted:N0} 个文件，释放 {FormatSize(result.BytesFreed)}";
+            if (result.FilesFailed > 0) summary += $"，{result.FilesFailed:N0} 个文件被占用跳过";
+            if (result.Problem != null) summary += $"（{result.Problem}）";
+
+            CleanStatusText.Text = summary;
+
+            // 重新扫描，数字刷新
+            await ReloadCleanItemsAsync(_cts.Token);
+            UpdateCleanSummary();
+        }
+        catch (OperationCanceledException)
+        {
+            CleanStatusText.Text = "已取消";
+        }
+        catch (Exception ex)
+        {
+            CleanStatusText.Text = "清理失败";
+            MessageBox.Show(this, ex.Message, "清理失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _cts.Dispose();
+            _cts = null;
+            SetCleanBusy(false);
+        }
+    }
+
+    private void UpdateCleanSummary()
+    {
+        var ready = _cleanRows.Where(r => r.Item.CanClean).ToList();
+        var selected = ready.Where(r => r.IsChecked).ToList();
+        var allSize = ready.Sum(r => r.Size);
+        var selSize = selected.Sum(r => r.Size);
+
+        CleanHint.Text = ready.Count == 0
+            ? ""
+            : $"共可清理 {FormatSize(allSize)} · 已选 {selected.Count} 项 / {FormatSize(selSize)}";
+
+        CleanRunButton.IsEnabled = selected.Count > 0;
+    }
+
+    private void SetCleanBusy(bool busy)
+    {
+        CleanScanButton.IsEnabled = !busy;
+        CleanRunButton.IsEnabled = !busy && _cleanRows.Any(r => r.IsChecked && r.Item.CanClean);
+        RecycleCheck.IsEnabled = !busy;
+        CleanList.IsEnabled = !busy;
+        CleanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        CleanProgressBar.IsIndeterminate = true;
+        CleanProgressBar.Value = 0;
+    }
+
     internal static string FormatSize(long bytes)
     {
         if (bytes < 1024) return $"{bytes} B";
@@ -154,4 +324,44 @@ public sealed class DirRow
     public string SizeText => MainWindow.FormatSize(Size);
     public string FilesText => FileCount.ToString("N0");
     public string PercentText => Percent <= 0 ? "" : Percent.ToString("F1") + "%";
+}
+
+/// <summary>清理页的一行，IsChecked 变化时通知父窗口更新合计。</summary>
+public sealed class CleanRow : INotifyPropertyChanged
+{
+    private bool _isChecked;
+
+    public required CleanItem Item { get; init; }
+    public required CleanRule Rule { get; init; }
+
+    public string Name => Item.Name;
+    public string Description => Item.Description;
+    public long Size => Item.Size;
+
+    public string SizeText => Item.State switch
+    {
+        CleanItemState.NotApplicable => "—",
+        CleanItemState.Failed => "无法读取",
+        _ => MainWindow.FormatSize(Item.Size),
+    };
+
+    public string FilesText => Item.State switch
+    {
+        CleanItemState.NotApplicable => "本机没有",
+        CleanItemState.Failed => "无权限",
+        _ => $"{Item.FileCount:N0} 个文件",
+    };
+
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            if (_isChecked == value) return;
+            _isChecked = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 }

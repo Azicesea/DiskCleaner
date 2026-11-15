@@ -5,65 +5,147 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="磁盘清理工具"
-        Height="620" Width="980"
+        Height="680" Width="1020"
         WindowStartupLocation="CenterScreen"
         FontFamily="Microsoft YaHei UI"
         Background="#F5F6F8">
 
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Window.Resources>
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Background" Value="#2F6FE4" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style x:Key="PlainButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Background" Value="#E8EAEE" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+    </Window.Resources>
 
-        <!-- 工具栏 -->
-        <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-            <StackPanel Orientation="Horizontal">
-                <TextBlock Text="扫描目标" VerticalAlignment="Center" Foreground="#555" Margin="0,0,10,0" />
-                <ComboBox x:Name="DriveCombo" Width="260" Height="32" VerticalContentAlignment="Center" />
-                <Button x:Name="ScanButton" Content="开始扫描" Width="100" Height="32"
-                        Margin="10,0,0,0" Click="ScanButton_Click"
-                        Background="#2F6FE4" Foreground="White" BorderThickness="0" />
-                <Button x:Name="CancelButton" Content="取消" Width="70" Height="32"
-                        Margin="8,0,0,0" Click="CancelButton_Click" IsEnabled="False"
-                        Background="#E8EAEE" BorderThickness="0" />
-            </StackPanel>
-        </Border>
+    <TabControl Margin="12" Background="Transparent" BorderThickness="0">
 
-        <!-- 进度 -->
-        <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-            <StackPanel>
-                <ProgressBar x:Name="ScanProgressBar" Height="6" IsIndeterminate="True" Visibility="Collapsed" />
-                <TextBlock x:Name="ProgressText" Text="选择磁盘后点「开始扫描」" Foreground="#666" Margin="0,6,0,0" />
-            </StackPanel>
-        </Border>
+        <!-- ============ 磁盘占用 ============ -->
+        <TabItem Header="磁盘占用">
+            <Grid Margin="4,10,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-        <!-- 结果表 -->
-        <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="8">
-            <DataGrid x:Name="ResultGrid"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True"
-                      CanUserAddRows="False"
-                      HeadersVisibility="Column"
-                      GridLinesVisibility="Horizontal"
-                      HorizontalGridLinesBrush="#EEF0F3"
-                      BorderThickness="0"
-                      RowHeight="34"
-                      FontSize="13"
-                      AlternatingRowBackground="#FAFBFC"
-                      AlternationCount="2">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*" />
-                    <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="140" />
-                    <DataGridTextColumn Header="文件数" Binding="{Binding FilesText}" Width="120" />
-                    <DataGridTextColumn Header="占比" Binding="{Binding PercentText}" Width="100" />
-                </DataGrid.Columns>
-            </DataGrid>
-        </Border>
+                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="扫描目标" VerticalAlignment="Center" Foreground="#555" Margin="0,0,10,0" />
+                        <ComboBox x:Name="DriveCombo" Width="280" Height="32" VerticalContentAlignment="Center" />
+                        <Button x:Name="ScanButton" Content="开始扫描" Width="100" Margin="10,0,0,0"
+                                Style="{StaticResource PrimaryButton}" Click="ScanButton_Click" />
+                        <Button x:Name="CancelButton" Content="取消" Width="70" Margin="8,0,0,0"
+                                Style="{StaticResource PlainButton}" Click="CancelButton_Click" IsEnabled="False" />
+                    </StackPanel>
+                </Border>
 
-        <!-- 状态栏 -->
-        <TextBlock x:Name="StatusText" Grid.Row="3" Text="" Foreground="#888" Margin="4,10,0,0" />
-    </Grid>
+                <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <StackPanel>
+                        <ProgressBar x:Name="ScanProgressBar" Height="6" IsIndeterminate="True" Visibility="Collapsed" />
+                        <TextBlock x:Name="ProgressText" Text="选择磁盘后点「开始扫描」" Foreground="#666" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="8">
+                    <DataGrid x:Name="ResultGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#EEF0F3"
+                              BorderThickness="0"
+                              RowHeight="34"
+                              FontSize="13"
+                              AlternatingRowBackground="#FAFBFC"
+                              AlternationCount="2">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*" />
+                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="140" />
+                            <DataGridTextColumn Header="文件数" Binding="{Binding FilesText}" Width="120" />
+                            <DataGridTextColumn Header="占比" Binding="{Binding PercentText}" Width="100" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <TextBlock x:Name="StatusText" Grid.Row="3" Text="" Foreground="#888" Margin="4,8,0,0" />
+            </Grid>
+        </TabItem>
+
+        <!-- ============ 清理 ============ -->
+        <TabItem Header="清理">
+            <Grid Margin="4,10,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="CleanScanButton" Content="扫描可清理项" Width="120"
+                                    Style="{StaticResource PrimaryButton}" Click="CleanScanButton_Click" />
+                            <Button x:Name="CleanRunButton" Content="清理选中项" Width="120" Margin="10,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="CleanRunButton_Click" IsEnabled="False" />
+                            <CheckBox x:Name="RecycleCheck" Content="删掉的文件放进回收站（可还原）"
+                                      VerticalAlignment="Center" Margin="16,0,0,0" />
+                            <TextBlock x:Name="CleanHint" Text="" VerticalAlignment="Center"
+                                       Foreground="#888" Margin="16,0,0,0" />
+                        </StackPanel>
+                        <ProgressBar x:Name="CleanProgressBar" Height="6" Margin="0,10,0,0"
+                                     Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="4">
+                    <ListBox x:Name="CleanList" BorderThickness="0" Background="Transparent"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="8,6" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="30" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="100" />
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Grid.Column="0" IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                              VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Description}" FontSize="12"
+                                                   Foreground="#888" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="14"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
+                                    <TextBlock Grid.Column="3" Text="{Binding FilesText}" FontSize="12"
+                                               Foreground="#888" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+
+                <TextBlock x:Name="CleanStatusText" Grid.Row="2" Text="点「扫描可清理项」看看能清出多少空间"
+                           Foreground="#888" Margin="4,8,0,0" />
+            </Grid>
+        </TabItem>
+    </TabControl>
 </Window>
