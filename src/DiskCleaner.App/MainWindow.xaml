@@ -223,6 +223,8 @@
                                     Style="{StaticResource PrimaryButton}" Click="CleanScanButton_Click" />
                             <Button x:Name="CleanRunButton" Content="清理选中项" Width="120" Margin="10,0,0,0"
                                     Style="{StaticResource PlainButton}" Click="CleanRunButton_Click" IsEnabled="False" />
+                            <Button x:Name="CustomRulesButton" Content="自定义规则…" Width="110" Margin="8,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="CustomRulesButton_Click" />
                             <CheckBox x:Name="RecycleCheck" Content="删掉的文件放进回收站（可还原）"
                                       VerticalAlignment="Center" Margin="16,0,0,0" />
                             <TextBlock x:Name="CleanHint" Text="" VerticalAlignment="Center"

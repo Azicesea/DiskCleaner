@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<DupRow> _dupRows = new();
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _dupCts;
+    private List<CleanRule> _customRules = CustomRuleStore.Load();
 
     private DirNode? _treemapRoot;
     private readonly List<DirNode> _treemapStack = new();
@@ -489,6 +490,50 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void CustomRulesButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var win = new CustomRulesWindow(_customRules) { Owner = this };
+            win.ShowDialog();
+            _customRules = win.Rules.ToList();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        // 规则改了，直接重扫一遍，免得用户看着旧列表
+        _cts = new CancellationTokenSource();
+        SetCleanBusy(true);
+        _cleanRows.Clear();
+        CleanStatusText.Text = "规则变了，正在重新扫描…";
+        try
+        {
+            await ReloadCleanItemsAsync(_cts.Token);
+            var ready = _cleanRows.Where(r => r.Item.CanClean).ToList();
+            CleanStatusText.Text = ready.Count == 0
+                ? "没有找到可清理的内容"
+                : $"扫描完成：{ready.Count} 项可清理，共 {FormatSize(ready.Sum(r => r.Size))}";
+        }
+        catch (OperationCanceledException)
+        {
+            CleanStatusText.Text = "已取消";
+        }
+        catch (Exception ex)
+        {
+            CleanStatusText.Text = "扫描失败";
+            MessageBox.Show(this, ex.Message, "扫描失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _cts.Dispose();
+            _cts = null;
+            SetCleanBusy(false);
+            UpdateCleanSummary();
+        }
+    }
+
     private async Task ReloadCleanItemsAsync(CancellationToken ct)
     {
         var progress = new Progress<CleanScanProgress>(p =>
@@ -497,7 +542,8 @@ public partial class MainWindow : Window
                 CleanStatusText.Text = $"正在扫描：{p.CurrentRule}（{p.Done + 1}/{p.Total}）";
         });
 
-        var items = await Task.Run(() => CleanScanner.Scan(DefaultRules.All, progress, ct), ct);
+        var rules = AllCleanRules();
+        var items = await Task.Run(() => CleanScanner.Scan(rules, progress, ct), ct);
         var previouslyChecked = _cleanRows
             .Where(r => r.IsChecked)
             .Select(r => r.Item.RuleId)
@@ -507,19 +553,33 @@ public partial class MainWindow : Window
         _cleanRows.Clear();
         foreach (var item in items)
         {
-            var rule = DefaultRules.All.First(r => r.Id == item.RuleId);
+            var rule = rules.FirstOrDefault(r => r.Id == item.RuleId);
+            if (rule is null) continue;
             var row = new CleanRow
             {
                 Item = item,
                 Rule = rule,
                 IsChecked = hadRows
                     ? previouslyChecked.Contains(item.RuleId)
-                    : DefaultRules.DefaultChecked(rule),
+                    : DefaultCheckedFor(rule),
             };
             row.PropertyChanged += (_, _) => UpdateCleanSummary();
             _cleanRows.Add(row);
         }
     }
+
+    /// <summary>内置规则 + 用户自定义规则。扫描和清理都必须用同一份，否则 Id 对不上。</summary>
+    private IReadOnlyList<CleanRule> AllCleanRules()
+    {
+        if (_customRules.Count == 0) return DefaultRules.All;
+        var list = new List<CleanRule>(DefaultRules.All);
+        list.AddRange(_customRules);
+        return list;
+    }
+
+    /// <summary>自定义规则是用户自己加的，默认勾上；回收站依旧不默认勾。</summary>
+    private static bool DefaultCheckedFor(CleanRule rule) =>
+        rule.Id.StartsWith("custom-", StringComparison.Ordinal) || DefaultRules.DefaultChecked(rule);
 
     private async void CleanRunButton_Click(object sender, RoutedEventArgs e)
     {
@@ -561,8 +621,9 @@ public partial class MainWindow : Window
 
         try
         {
+            var rules = AllCleanRules();
             var result = await Task.Run(() => CleanExecutor.Execute(
-                DefaultRules.All, ids, progress, _cts.Token, forceRecycleBin: toRecycle));
+                rules, ids, progress, _cts.Token, forceRecycleBin: toRecycle));
 
             var summary = $"清理完成：删除 {result.FilesDeleted:N0} 个文件，释放 {FormatSize(result.BytesFreed)}";
             if (result.FilesFailed > 0) summary += $"，{result.FilesFailed:N0} 个文件被占用跳过";
