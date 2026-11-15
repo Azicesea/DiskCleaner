@@ -55,6 +55,25 @@ public partial class MainWindow : Window
         FillDriveCombo(DriveCombo);
         FillDriveCombo(DupDriveCombo);
         FillDriveCombo(FindRootCombo);
+        ApplyPage(NavDrive.Tag as string);
+    }
+
+    // ================= 导航 =================
+
+    private void Nav_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb) return;
+        ApplyPage(rb.Tag as string);
+    }
+
+    private void ApplyPage(string? tag)
+    {
+        if (tag is null || PageDrive is null) return;
+        PageDrive.Visibility = tag == nameof(PageDrive) ? Visibility.Visible : Visibility.Collapsed;
+        PageBig.Visibility = tag == nameof(PageBig) ? Visibility.Visible : Visibility.Collapsed;
+        PageDup.Visibility = tag == nameof(PageDup) ? Visibility.Visible : Visibility.Collapsed;
+        PageFind.Visibility = tag == nameof(PageFind) ? Visibility.Visible : Visibility.Collapsed;
+        PageClean.Visibility = tag == nameof(PageClean) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>把本机的固定磁盘填进下拉框，默认选第一个。</summary>
