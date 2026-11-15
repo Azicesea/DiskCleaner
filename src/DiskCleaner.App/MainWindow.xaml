@@ -164,7 +164,9 @@
                 <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
-                            <Button x:Name="DupScanButton" Content="查找重复文件" Width="120"
+                            <TextBlock Text="扫描位置" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#555" />
+                            <ComboBox x:Name="DupDriveCombo" Width="280" Height="30" VerticalContentAlignment="Center" />
+                            <Button x:Name="DupScanButton" Content="查找重复文件" Width="120" Margin="10,0,0,0"
                                     Style="{StaticResource PrimaryButton}" Click="DupScanButton_Click" />
                             <Button x:Name="DupCancelButton" Content="取消" Width="70" Margin="8,0,0,0"
                                     Style="{StaticResource PlainButton}" Click="DupCancelButton_Click" IsEnabled="False" />

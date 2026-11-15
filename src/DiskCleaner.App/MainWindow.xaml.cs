@@ -44,12 +44,19 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        FillDriveCombo(DriveCombo);
+        FillDriveCombo(DupDriveCombo);
+    }
+
+    /// <summary>把本机的固定磁盘填进下拉框，默认选第一个。</summary>
+    private static void FillDriveCombo(System.Windows.Controls.ComboBox combo)
+    {
         foreach (var drive in DriveInfo.GetDrives())
         {
             try
             {
                 if (drive.DriveType != DriveType.Fixed || !drive.IsReady) continue;
-                DriveCombo.Items.Add(new DriveItem
+                combo.Items.Add(new DriveItem
                 {
                     Path = drive.RootDirectory.FullName,
                     Label = $"{drive.Name.TrimEnd('\\')}   可用 {FormatSize(drive.AvailableFreeSpace)} / 共 {FormatSize(drive.TotalSize)}",
@@ -60,7 +67,7 @@ public partial class MainWindow : Window
                 // 光驱/不可用盘符直接跳过
             }
         }
-        if (DriveCombo.Items.Count > 0) DriveCombo.SelectedIndex = 0;
+        if (combo.Items.Count > 0) combo.SelectedIndex = 0;
     }
 
     // ================= 磁盘占用 =================
@@ -200,9 +207,9 @@ public partial class MainWindow : Window
 
     private async void DupScanButton_Click(object sender, RoutedEventArgs e)
     {
-        if (DriveCombo.SelectedItem is not DriveItem drive)
+        if (DupDriveCombo.SelectedItem is not DriveItem drive)
         {
-            MessageBox.Show(this, "先在上面选一个磁盘。", "提示",
+            MessageBox.Show(this, "先选一个要扫描的磁盘。", "提示",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
@@ -266,13 +273,13 @@ public partial class MainWindow : Window
 
             if (groups.Count == 0)
             {
-                DupStatus.Text = $"没找到重复文件（只看大于 {minLabel} 的）。";
+                DupStatus.Text = $"{drive.Path} 里没找到重复文件（只看大于 {minLabel} 的）。";
                 DupProgressText.Text = "没有发现重复";
             }
             else
             {
                 DupStatus.Text =
-                    $"找到 {groups.Count:N0} 组重复、共 {totalFiles:N0} 个文件，" +
+                    $"{drive.Path} 找到 {groups.Count:N0} 组重复、共 {totalFiles:N0} 个文件，" +
                     $"每组只留 1 个能省 {FormatSize(wasted)}，检查耗时 {sw.Elapsed.TotalSeconds:F1} 秒。" +
                     "标着「系统文件」的是程序自带的多份拷贝，不建议删。";
                 DupProgressText.Text = "双击一行可以在资源管理器中定位。";
@@ -318,6 +325,7 @@ public partial class MainWindow : Window
         DupScanButton.IsEnabled = !busy;
         DupCancelButton.IsEnabled = busy;
         DupMinSizeCombo.IsEnabled = !busy;
+        DupDriveCombo.IsEnabled = !busy;
         DupProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         if (busy)
         {
