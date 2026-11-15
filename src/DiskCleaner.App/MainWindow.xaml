@@ -39,14 +39,26 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="扫描目标" VerticalAlignment="Center" Foreground="#555" Margin="0,0,10,0" />
-                        <ComboBox x:Name="DriveCombo" Width="280" Height="32" VerticalContentAlignment="Center" />
-                        <Button x:Name="ScanButton" Content="开始扫描" Width="100" Margin="10,0,0,0"
-                                Style="{StaticResource PrimaryButton}" Click="ScanButton_Click" />
-                        <Button x:Name="CancelButton" Content="取消" Width="70" Margin="8,0,0,0"
-                                Style="{StaticResource PlainButton}" Click="CancelButton_Click" IsEnabled="False" />
-                    </StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="扫描目标" VerticalAlignment="Center" Foreground="#555" Margin="0,0,10,0" />
+                            <ComboBox x:Name="DriveCombo" Width="280" Height="32" VerticalContentAlignment="Center" />
+                            <Button x:Name="ScanButton" Content="开始扫描" Width="100" Margin="10,0,0,0"
+                                    Style="{StaticResource PrimaryButton}" Click="ScanButton_Click" />
+                            <Button x:Name="CancelButton" Content="取消" Width="70" Margin="8,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="CancelButton_Click" IsEnabled="False" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <RadioButton x:Name="ViewListRadio" Content="列表" IsChecked="True" GroupName="ViewMode"
+                                         VerticalAlignment="Center" Checked="ViewMode_Changed" />
+                            <RadioButton x:Name="ViewMapRadio" Content="树图" GroupName="ViewMode" Margin="14,0,0,0"
+                                         VerticalAlignment="Center" Checked="ViewMode_Changed" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
 
                 <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
@@ -57,7 +69,64 @@
                 </Border>
 
                 <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="8">
-                    <DataGrid x:Name="ResultGrid"
+                    <Grid>
+                        <DataGrid x:Name="ResultGrid"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  HeadersVisibility="Column"
+                                  GridLinesVisibility="Horizontal"
+                                  HorizontalGridLinesBrush="#EEF0F3"
+                                  BorderThickness="0"
+                                  RowHeight="34"
+                                  FontSize="13"
+                                  AlternatingRowBackground="#FAFBFC"
+                                  AlternationCount="2">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*" />
+                                <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="140" />
+                                <DataGridTextColumn Header="文件数" Binding="{Binding FilesText}" Width="120" />
+                                <DataGridTextColumn Header="占比" Binding="{Binding PercentText}" Width="100" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <Grid x:Name="TreemapHost" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="4,2,4,8">
+                                <Button x:Name="TreemapUpButton" Content="← 返回上级" Height="26" Padding="10,0"
+                                        Style="{StaticResource PlainButton}" Click="TreemapUp_Click" IsEnabled="False" />
+                                <TextBlock x:Name="TreemapPathText" VerticalAlignment="Center" Margin="12,0,0,0"
+                                           Foreground="#555" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <Canvas x:Name="TreemapCanvas" Grid.Row="1" Background="#FAFBFC" ClipToBounds="True"
+                                    SizeChanged="TreemapCanvas_SizeChanged" />
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <TextBlock x:Name="StatusText" Grid.Row="3" Text="" Foreground="#888" Margin="4,8,0,0" />
+            </Grid>
+        </TabItem>
+
+        <!-- ============ 大文件 ============ -->
+        <TabItem Header="大文件">
+            <Grid Margin="4,10,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <TextBlock x:Name="BigFileHint" Foreground="#666" TextWrapping="Wrap"
+                               Text="扫描磁盘后，这里按大小列出单个文件。双击一行可以在资源管理器中定位到它。" />
+                </Border>
+
+                <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="8">
+                    <DataGrid x:Name="BigFileGrid"
                               AutoGenerateColumns="False"
                               IsReadOnly="True"
                               CanUserAddRows="False"
@@ -65,20 +134,21 @@
                               GridLinesVisibility="Horizontal"
                               HorizontalGridLinesBrush="#EEF0F3"
                               BorderThickness="0"
-                              RowHeight="34"
+                              RowHeight="32"
                               FontSize="13"
                               AlternatingRowBackground="#FAFBFC"
-                              AlternationCount="2">
+                              AlternationCount="2"
+                              MouseDoubleClick="BigFileGrid_MouseDoubleClick">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*" />
-                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="140" />
-                            <DataGridTextColumn Header="文件数" Binding="{Binding FilesText}" Width="120" />
-                            <DataGridTextColumn Header="占比" Binding="{Binding PercentText}" Width="100" />
+                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="110" />
+                            <DataGridTextColumn Header="文件名" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn Header="所在文件夹" Binding="{Binding Folder}" Width="3*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Border>
 
-                <TextBlock x:Name="StatusText" Grid.Row="3" Text="" Foreground="#888" Margin="4,8,0,0" />
+                <TextBlock x:Name="BigFileStatus" Grid.Row="2" Margin="4,8,0,0" Foreground="#888"
+                           Text="还没有扫描过" />
             </Grid>
         </TabItem>
 

@@ -20,6 +20,9 @@ public sealed class ScanResult
     public long FilesSeen { get; init; }
     public long BytesSeen { get; init; }
     public int InaccessibleDirs { get; init; }
+
+    /// <summary>扫到的最大的若干文件，按大小降序。</summary>
+    public List<FileEntry> TopFiles { get; init; } = new();
 }
 
 /// <summary>
@@ -28,6 +31,30 @@ public sealed class ScanResult
 /// </summary>
 public static class DiskScanner
 {
+    private sealed class TopCollector
+    {
+        private readonly List<FileEntry> _items = new();
+        private readonly int _limit;
+        public TopCollector(int limit) => _limit = Math.Max(1, limit);
+
+        public void Add(string path, long size)
+        {
+            _items.Add(new FileEntry { Path = path, Size = size });
+            if (_items.Count > _limit * 4)
+            {
+                _items.Sort((a, b) => b.Size.CompareTo(a.Size));
+                _items.RemoveRange(_limit, _items.Count - _limit);
+            }
+        }
+
+        public List<FileEntry> Finish()
+        {
+            _items.Sort((a, b) => b.Size.CompareTo(a.Size));
+            if (_items.Count > _limit) _items.RemoveRange(_limit, _items.Count - _limit);
+            return _items;
+        }
+    }
+
     private sealed class Counters
     {
         public long Files;
@@ -40,7 +67,8 @@ public static class DiskScanner
     public static ScanResult Scan(
         string rootPath,
         IProgress<ScanProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        int topFileLimit = 200)
     {
         var sw = Stopwatch.StartNew();
         var full = Path.GetFullPath(rootPath);
@@ -51,6 +79,7 @@ public static class DiskScanner
         };
 
         var counters = new Counters();
+        var topCollector = new TopCollector(topFileLimit);
         var opts = new EnumerationOptions
         {
             RecurseSubdirectories = false,
@@ -79,6 +108,7 @@ public static class DiskScanner
                     root.FileCount++;
                     root.DirectSize += len;
                     root.DirectFileCount++;
+                    topCollector.Add(f.FullName, len);
                     Interlocked.Increment(ref counters.Files);
                     Interlocked.Add(ref counters.Bytes, len);
                 }
@@ -105,6 +135,7 @@ public static class DiskScanner
         }
 
         var children = new List<DirNode>();
+        var localCollectors = new System.Collections.Concurrent.ConcurrentBag<TopCollector>();
         var parallelOpts = new ParallelOptions
         {
             MaxDegreeOfParallelism = Math.Max(4, Environment.ProcessorCount),
@@ -114,7 +145,9 @@ public static class DiskScanner
         Parallel.ForEach(subDirs, parallelOpts, dir =>
         {
             var child = new DirNode { Name = dir.Name, FullPath = dir.FullName };
-            ScanDir(child, counters, progress, sw, ct, opts);
+            var localTop = new TopCollector(topFileLimit);
+            ScanDir(child, counters, localTop, progress, sw, ct, opts);
+            localCollectors.Add(localTop);
             lock (children) { children.Add(child); }
             Report(force: false);
         });
@@ -137,6 +170,14 @@ public static class DiskScanner
             ElapsedMs = sw.ElapsedMilliseconds,
         });
 
+        // 合并各分支的大文件榜
+        var allTop = new List<FileEntry>();
+        allTop.AddRange(topCollector.Finish());
+        foreach (var c in localCollectors) allTop.AddRange(c.Finish());
+        allTop.Sort((a, b) => b.Size.CompareTo(a.Size));
+        if (allTop.Count > topFileLimit)
+            allTop.RemoveRange(topFileLimit, allTop.Count - topFileLimit);
+
         return new ScanResult
         {
             Root = root,
@@ -144,12 +185,14 @@ public static class DiskScanner
             FilesSeen = counters.Files,
             BytesSeen = counters.Bytes,
             InaccessibleDirs = counters.Inaccessible,
+            TopFiles = allTop,
         };
     }
 
     private static void ScanDir(
         DirNode node,
         Counters counters,
+        TopCollector topCollector,
         IProgress<ScanProgress>? progress,
         Stopwatch sw,
         CancellationToken ct,
@@ -168,7 +211,7 @@ public static class DiskScanner
                 if (info is DirectoryInfo d)
                 {
                     var child = new DirNode { Name = d.Name, FullPath = d.FullName };
-                    ScanDir(child, counters, progress, sw, ct, opts);
+                    ScanDir(child, counters, topCollector, progress, sw, ct, opts);
                     node.Children.Add(child);
                     node.Size += child.Size;
                     node.FileCount += child.FileCount;
@@ -183,6 +226,7 @@ public static class DiskScanner
                     node.FileCount++;
                     node.DirectSize += len;
                     node.DirectFileCount++;
+                    topCollector.Add(f.FullName, len);
 
                     Interlocked.Increment(ref counters.Files);
                     Interlocked.Add(ref counters.Bytes, len);

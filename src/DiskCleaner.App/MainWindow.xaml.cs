@@ -1,8 +1,13 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
 using DiskCleaner.Core.Clean;
 using DiskCleaner.Core.Models;
 using DiskCleaner.Core.Scan;
@@ -13,13 +18,18 @@ public partial class MainWindow : Window
 {
     private readonly ObservableCollection<DirRow> _rows = new();
     private readonly ObservableCollection<CleanRow> _cleanRows = new();
+    private readonly ObservableCollection<BigFileRow> _bigRows = new();
     private CancellationTokenSource? _cts;
+
+    private DirNode? _treemapRoot;
+    private readonly List<DirNode> _treemapStack = new();
 
     public MainWindow()
     {
         InitializeComponent();
         ResultGrid.ItemsSource = _rows;
         CleanList.ItemsSource = _cleanRows;
+        BigFileGrid.ItemsSource = _bigRows;
         Loaded += MainWindow_Loaded;
     }
 
@@ -68,6 +78,10 @@ public partial class MainWindow : Window
                 () => DiskScanner.Scan(drive.Path, progress, _cts.Token));
 
             FillRows(result);
+            FillBigFiles(result);
+            _treemapRoot = result.Root;
+            _treemapStack.Clear();
+            if (ViewMapRadio.IsChecked == true) RenderTreemap();
             StatusText.Text =
                 $"扫描完成：{result.FilesSeen:N0} 个文件，共 {FormatSize(result.BytesSeen)}，" +
                 $"耗时 {(result.ElapsedMs / 1000.0):F1} 秒" +
@@ -132,6 +146,163 @@ public partial class MainWindow : Window
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressBar.IsIndeterminate = busy;
     }
+
+    // ================= 大文件 =================
+
+    private void FillBigFiles(ScanResult result)
+    {
+        _bigRows.Clear();
+        foreach (var f in result.TopFiles)
+        {
+            _bigRows.Add(new BigFileRow
+            {
+                Name = f.Name,
+                Size = f.Size,
+                Folder = f.Directory ?? "",
+                FullPath = f.Path,
+            });
+        }
+
+        BigFileStatus.Text = _bigRows.Count == 0
+            ? "没有找到文件"
+            : $"最大的 {_bigRows.Count} 个文件，合计 {FormatSize(_bigRows.Sum(r => r.Size))}。双击可在资源管理器中定位。";
+    }
+
+    private void BigFileGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (BigFileGrid.SelectedItem is not BigFileRow row) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{row.FullPath}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法打开所在文件夹",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    // ================= 树图 =================
+
+    private void ViewMode_Changed(object sender, RoutedEventArgs e)
+    {
+        // XAML 解析阶段 IsChecked="True" 就会触发一次，那时控件字段还没赋值。
+        if (ResultGrid is null || TreemapHost is null) return;
+
+        var showMap = ViewMapRadio.IsChecked == true;
+        ResultGrid.Visibility = showMap ? Visibility.Collapsed : Visibility.Visible;
+        TreemapHost.Visibility = showMap ? Visibility.Visible : Visibility.Collapsed;
+        if (showMap) RenderTreemap();
+    }
+
+    private void TreemapCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (ViewMapRadio is null || TreemapCanvas is null) return;
+        if (ViewMapRadio.IsChecked == true) RenderTreemap();
+    }
+
+    private void TreemapUp_Click(object sender, RoutedEventArgs e)
+    {
+        if (_treemapStack.Count == 0) return;
+        _treemapRoot = _treemapStack[^1];
+        _treemapStack.RemoveAt(_treemapStack.Count - 1);
+        RenderTreemap();
+    }
+
+    private void RenderTreemap()
+    {
+        TreemapCanvas.Children.Clear();
+        var node = _treemapRoot;
+        if (node is null)
+        {
+            TreemapPathText.Text = "还没有扫描";
+            TreemapUpButton.IsEnabled = false;
+            return;
+        }
+
+        TreemapPathText.Text = node.FullPath;
+        TreemapUpButton.IsEnabled = _treemapStack.Count > 0;
+
+        var w = TreemapCanvas.ActualWidth;
+        var h = TreemapCanvas.ActualHeight;
+        if (w < 20 || h < 20) return;
+
+        var blocks = TreemapLayout.Layout(node, w, h);
+        var total = Math.Max(1, node.Size);
+
+        for (var i = 0; i < blocks.Count; i++)
+        {
+            var block = blocks[i];
+            var child = block.Node;
+            var share = child.Size * 100.0 / total;
+            var canDrill = child.Children.Count > 0 || child.DirectSize > 0;
+
+            var rect = new Rectangle
+            {
+                Width = Math.Max(0, block.Width - 1),
+                Height = Math.Max(0, block.Height - 1),
+                Fill = BlockBrush(i),
+                Stroke = Brushes.White,
+                StrokeThickness = 1,
+                Cursor = canDrill ? Cursors.Hand : Cursors.Arrow,
+                ToolTip = $"{child.Name}\n{FormatSize(child.Size)}  {child.FileCount:N0} 个文件  {share:F1}%",
+            };
+            var target = child;
+            var drillable = canDrill;
+            rect.MouseLeftButtonUp += (_, _) => DrillInto(target, drillable);
+            Canvas.SetLeft(rect, block.X);
+            Canvas.SetTop(rect, block.Y);
+            TreemapCanvas.Children.Add(rect);
+
+            if (block.Width >= 68 && block.Height >= 30)
+            {
+                var label = new TextBlock
+                {
+                    Text = block.Height >= 46
+                        ? $"{child.Name}\n{FormatSize(child.Size)}  {share:F0}%"
+                        : $"{child.Name}  {FormatSize(child.Size)}",
+                    Foreground = Brushes.White,
+                    FontSize = 11,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    IsHitTestVisible = false,
+                    Margin = new Thickness(4, 2, 0, 0),
+                };
+                Canvas.SetLeft(label, block.X);
+                Canvas.SetTop(label, block.Y);
+                TreemapCanvas.Children.Add(label);
+            }
+        }
+    }
+
+    private void DrillInto(DirNode node, bool canDrill)
+    {
+        if (!canDrill || _treemapRoot is null) return;
+        _treemapStack.Add(_treemapRoot);
+        _treemapRoot = node;
+        RenderTreemap();
+    }
+
+    private static readonly Brush[] BlockBrushes =
+    {
+        MakeBrush(0x4C, 0x8B, 0xF5), MakeBrush(0x5E, 0x9A, 0xE8), MakeBrush(0x6F, 0xA6, 0xDC),
+        MakeBrush(0x7E, 0xB0, 0xD2), MakeBrush(0x6A, 0xB3, 0xB0), MakeBrush(0x7B, 0xBE, 0xA4),
+        MakeBrush(0x8E, 0xC6, 0x95), MakeBrush(0xA3, 0xCB, 0x86), MakeBrush(0xBE, 0xC4, 0x76),
+        MakeBrush(0xCF, 0xB5, 0x6C), MakeBrush(0xD9, 0xA2, 0x6C), MakeBrush(0xD3, 0x8E, 0x7E),
+    };
+
+    private static Brush MakeBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Brush BlockBrush(int index) => BlockBrushes[index % BlockBrushes.Length];
 
     // ================= 清理 =================
 
@@ -324,6 +495,17 @@ public sealed class DirRow
     public string SizeText => MainWindow.FormatSize(Size);
     public string FilesText => FileCount.ToString("N0");
     public string PercentText => Percent <= 0 ? "" : Percent.ToString("F1") + "%";
+}
+
+/// <summary>大文件页的一行。</summary>
+public sealed class BigFileRow
+{
+    public required string Name { get; init; }
+    public required string Folder { get; init; }
+    public required string FullPath { get; init; }
+    public long Size { get; init; }
+
+    public string SizeText => MainWindow.FormatSize(Size);
 }
 
 /// <summary>清理页的一行，IsChecked 变化时通知父窗口更新合计。</summary>

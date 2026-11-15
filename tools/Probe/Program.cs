@@ -79,6 +79,46 @@ if (mode == "clean")
     return;
 }
 
+if (mode == "treemap")
+{
+    var treeTarget = args.Length > 1 ? args[1] : @"E:\";
+    var res = DiskScanner.Scan(treeTarget);
+    const double W = 800, H = 500;
+    var sw = Stopwatch.StartNew();
+    var blocks = TreemapLayout.Layout(res.Root, W, H);
+    sw.Stop();
+
+    Console.WriteLine($"目录: {treeTarget}  根大小 {res.Root.Size / 1073741824.0:F2} GB");
+    Console.WriteLine($"布局耗时: {sw.ElapsedMilliseconds} ms, 块数: {blocks.Count}, 子项总数: {res.Root.Children.Count}");
+
+    var area = 0.0;
+    var bad = 0;
+    var negative = 0;
+    foreach (var b in blocks)
+    {
+        if (b.Width < 0 || b.Height < 0) negative++;
+        if (b.X < -0.01 || b.Y < -0.01 || b.X + b.Width > W + 0.01 || b.Y + b.Height > H + 0.01) bad++;
+        area += b.Width * b.Height;
+    }
+
+    var overlap = 0;
+    for (var i = 0; i < blocks.Count; i++)
+    for (var j = i + 1; j < blocks.Count; j++)
+    {
+        var a = blocks[i];
+        var b = blocks[j];
+        var ox = Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X);
+        var oy = Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y);
+        if (ox > 0.01 && oy > 0.01) overlap++;
+    }
+
+    Console.WriteLine($"面积覆盖率: {area / (W * H) * 100:F2}%  (应≈100%)");
+    Console.WriteLine($"越界块: {bad}  负尺寸块: {negative}  重叠对: {overlap}   (应全为 0)");
+    foreach (var b in blocks.Take(8))
+        Console.WriteLine($"  {b.Node.Name,-24} {b.Node.Size / 1073741824.0,8:F2} GB  x={b.X,7:F1} y={b.Y,7:F1} w={b.Width,7:F1} h={b.Height,7:F1}");
+    return;
+}
+
 var target = args.Length > 0 ? args[0] : @"E:\";
 Console.WriteLine($"扫描: {target}");
 
@@ -101,4 +141,11 @@ foreach (var child in result.Root.Children.Take(20))
 {
     var pct = child.Size * 100.0 / Math.Max(1, result.Root.Size);
     Console.WriteLine($"  {child.Size / 1073741824.0,9:F2} GB  {pct,5:F1}%  {child.FileCount,10:N0} 文件  {child.FullPath}");
+}
+
+Console.WriteLine();
+Console.WriteLine($"最大文件 Top {Math.Min(15, result.TopFiles.Count)}（共收集 {result.TopFiles.Count} 个）:");
+foreach (var f in result.TopFiles.Take(15))
+{
+    Console.WriteLine($"  {f.Size / 1048576.0,9:F1} MB  {f.Path}");
 }
