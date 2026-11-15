@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using DiskCleaner.Core.Clean;
@@ -22,6 +22,50 @@ public partial class CustomRulesWindow : Window
         foreach (var rule in _rules) _rows.Add(new RuleRow { Rule = rule });
     }
 
+    private void BrowseButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择要清理的文件夹（可以多选）",
+            Multiselect = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var added = 0;
+        foreach (var folder in dialog.FolderNames)
+        {
+            if (AppendPath(folder.Trim())) added++;
+        }
+
+        HintText.Text = added > 0
+            ? $"已加入 {added} 个文件夹。"
+            : "选的文件夹已经在列表里了。";
+    }
+
+    private void ClearPath_Click(object sender, RoutedEventArgs e)
+    {
+        PathBox.Clear();
+        HintText.Text = "路径已清空。";
+    }
+
+    /// <summary>把路径追加到输入框末尾，重复的直接跳过。返回是否真的加进去了。</summary>
+    private bool AppendPath(string path)
+    {
+        if (path.Length == 0) return false;
+
+        var existing = PathBox.Text
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (existing.Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        PathBox.Text = existing.Length == 0
+            ? path
+            : PathBox.Text.TrimEnd() + Environment.NewLine + path;
+        PathBox.CaretIndex = PathBox.Text.Length;
+        return true;
+    }
+
     private void AddButton_Click(object sender, RoutedEventArgs e)
     {
         var name = NameBox.Text.Trim();
@@ -39,7 +83,7 @@ public partial class CustomRulesWindow : Window
         }
         if (paths.Length == 0)
         {
-            MessageBox.Show(this, "至少写一个路径。", "还差一点",
+            MessageBox.Show(this, "点「浏览…」选一个文件夹，或者直接在框里写路径。", "还差一点",
                 MessageBoxButton.OK, MessageBoxImage.Information);
             PathBox.Focus();
             return;

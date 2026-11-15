@@ -32,7 +32,7 @@
 
         <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
             <TextBlock Foreground="#555" TextWrapping="Wrap"
-                       Text="在这里加你自己想清理的文件夹。路径可以写 %TEMP% 这类环境变量，也可以用 * 通配；写了目录就清空里面所有文件，目录本身保留。" />
+                       Text="在这里加你自己想清理的文件夹。点下面的「浏览…」直接选文件夹，也可以手写路径（支持 %TEMP% 这类环境变量和 * 通配）；写了目录就清空里面所有文件，目录本身保留。" />
         </Border>
 
         <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="8">
@@ -77,12 +77,19 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="路径" Width="48" VerticalAlignment="Top"
                                Margin="0,6,0,0" Foreground="#555" />
                     <TextBox x:Name="PathBox" Grid.Column="1" Height="64" AcceptsReturn="True"
                              TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="6,4"
                              FontFamily="Consolas, Microsoft YaHei UI" />
+                    <StackPanel Grid.Column="2" Margin="8,0,0,0">
+                        <Button x:Name="BrowseButton" Content="浏览…" Width="86"
+                                Style="{StaticResource PlainButton}" Click="BrowseButton_Click" />
+                        <Button x:Name="ClearPathButton" Content="清空" Width="86" Margin="0,6,0,0"
+                                Style="{StaticResource PlainButton}" Click="ClearPath_Click" />
+                    </StackPanel>
                 </Grid>
 
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
@@ -96,7 +103,7 @@
 
                 <TextBlock Grid.Row="3" x:Name="HintText" Foreground="#888" FontSize="12"
                            Margin="0,8,0,0" TextWrapping="Wrap"
-                           Text="一行一个路径。目录会递归清理里面的文件，但目录本身不会被删。" />
+                           Text="点「浏览…」选文件夹，也可以直接写路径（支持 %TEMP% 和 * 通配）。一行一个，目录会递归清理里面的文件，目录本身不删。" />
             </Grid>
         </Border>
 
