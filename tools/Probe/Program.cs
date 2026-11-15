@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DiskCleaner.Core.Clean;
+using DiskCleaner.Core.Dup;
 using DiskCleaner.Core.Scan;
 
 var mode = args.Length > 0 ? args[0] : "scan";
@@ -116,6 +117,33 @@ if (mode == "treemap")
     Console.WriteLine($"越界块: {bad}  负尺寸块: {negative}  重叠对: {overlap}   (应全为 0)");
     foreach (var b in blocks.Take(8))
         Console.WriteLine($"  {b.Node.Name,-24} {b.Node.Size / 1073741824.0,8:F2} GB  x={b.X,7:F1} y={b.Y,7:F1} w={b.Width,7:F1} h={b.Height,7:F1}");
+    return;
+}
+
+if (mode == "dup")
+{
+    var dupTarget = args.Length > 1 ? args[1] : @"E:\";
+    var minSize = args.Length > 2 ? long.Parse(args[2]) : 1024 * 1024;
+    Console.WriteLine($"查找重复文件: {dupTarget}  最小 {minSize / 1024.0:F0} KB");
+    var sw = Stopwatch.StartNew();
+    long lastTick = 0;
+    var groups = DuplicateFinder.Find(dupTarget, new Progress<DupProgress>(p =>
+    {
+        var now = Environment.TickCount64;
+        if (now - Interlocked.Read(ref lastTick) < 500) return;
+        Interlocked.Exchange(ref lastTick, now);
+        Console.WriteLine($"  {p.Stage}  {p.FilesDone:N0}/{p.FilesTotal:N0}");
+    }), minFileSize: minSize);
+    sw.Stop();
+
+    var totalWasted = groups.Sum(g => g.WastedBytes);
+    Console.WriteLine($"完成: {groups.Count} 组重复, 共 {groups.Sum(g => g.Files.Count)} 个文件, 可省 {totalWasted / 1073741824.0:F2} GB, 耗时 {sw.Elapsed.TotalSeconds:F1} 秒");
+    foreach (var g in groups.Take(10))
+    {
+        Console.WriteLine($"  [{g.Size / 1048576.0:F1} MB x {g.Files.Count}] 可省 {g.WastedBytes / 1048576.0:F1} MB");
+        foreach (var f in g.Files.Take(3))
+            Console.WriteLine($"      {f.Path}");
+    }
     return;
 }
 

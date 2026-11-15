@@ -152,6 +152,61 @@
             </Grid>
         </TabItem>
 
+        <!-- ============ 重复文件 ============ -->
+        <TabItem Header="重复文件">
+            <Grid Margin="4,10,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="DupScanButton" Content="查找重复文件" Width="120"
+                                    Style="{StaticResource PrimaryButton}" Click="DupScanButton_Click" />
+                            <Button x:Name="DupCancelButton" Content="取消" Width="70" Margin="8,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="DupCancelButton_Click" IsEnabled="False" />
+                            <TextBlock Text="只看大于" VerticalAlignment="Center" Margin="18,0,6,0" Foreground="#555" />
+                            <ComboBox x:Name="DupMinSizeCombo" Width="110" Height="30" VerticalContentAlignment="Center" />
+                            <TextBlock Text="的文件" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="#555" />
+                        </StackPanel>
+                        <ProgressBar x:Name="DupProgressBar" Height="6" Margin="0,10,0,0" Visibility="Collapsed" />
+                        <TextBlock x:Name="DupProgressText" Foreground="#666" Margin="2,8,0,0" TextWrapping="Wrap"
+                                   Text="内容完全相同的文件会按组列出来。这里只读不删，双击可以在资源管理器中定位。" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Background="White" CornerRadius="8" Padding="8">
+                    <DataGrid x:Name="DupGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#EEF0F3"
+                              BorderThickness="0"
+                              RowHeight="30"
+                              FontSize="13"
+                              AlternatingRowBackground="#FAFBFC"
+                              AlternationCount="2"
+                              MouseDoubleClick="DupGrid_MouseDoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="组" Binding="{Binding GroupText}" Width="110" />
+                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="100" />
+                            <DataGridTextColumn Header="文件名" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn Header="所在文件夹" Binding="{Binding Folder}" Width="3*" />
+                            <DataGridTextColumn Header="提示" Binding="{Binding Note}" Width="90" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <TextBlock x:Name="DupStatus" Grid.Row="2" Margin="4,8,0,0" Foreground="#888"
+                           Text="还没有查找过" />
+            </Grid>
+        </TabItem>
+
         <!-- ============ 清理 ============ -->
         <TabItem Header="清理">
             <Grid Margin="4,10,4,4">

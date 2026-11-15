@@ -9,6 +9,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using DiskCleaner.Core.Clean;
+using DiskCleaner.Core.Dup;
 using DiskCleaner.Core.Models;
 using DiskCleaner.Core.Scan;
 
@@ -19,7 +20,9 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<DirRow> _rows = new();
     private readonly ObservableCollection<CleanRow> _cleanRows = new();
     private readonly ObservableCollection<BigFileRow> _bigRows = new();
+    private readonly ObservableCollection<DupRow> _dupRows = new();
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _dupCts;
 
     private DirNode? _treemapRoot;
     private readonly List<DirNode> _treemapStack = new();
@@ -30,6 +33,11 @@ public partial class MainWindow : Window
         ResultGrid.ItemsSource = _rows;
         CleanList.ItemsSource = _cleanRows;
         BigFileGrid.ItemsSource = _bigRows;
+        DupGrid.ItemsSource = _dupRows;
+        DupMinSizeCombo.Items.Add(new SizeOption { Label = "1 MB", Bytes = 1024L * 1024 });
+        DupMinSizeCombo.Items.Add(new SizeOption { Label = "10 MB", Bytes = 10L * 1024 * 1024 });
+        DupMinSizeCombo.Items.Add(new SizeOption { Label = "100 MB", Bytes = 100L * 1024 * 1024 });
+        DupMinSizeCombo.SelectedIndex = 0;
         Loaded += MainWindow_Loaded;
     }
 
@@ -185,6 +193,147 @@ public partial class MainWindow : Window
             MessageBox.Show(this, ex.Message, "无法打开所在文件夹",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    // ================= 重复文件 =================
+
+    private async void DupScanButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (DriveCombo.SelectedItem is not DriveItem drive)
+        {
+            MessageBox.Show(this, "先在上面选一个磁盘。", "提示",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _dupCts?.Cancel();
+        _dupCts = new CancellationTokenSource();
+        var ct = _dupCts.Token;
+        var minLabel = (DupMinSizeCombo.SelectedItem as SizeOption)?.Label ?? "1 MB";
+        var minSize = (DupMinSizeCombo.SelectedItem as SizeOption)?.Bytes ?? 1024L * 1024;
+
+        _dupRows.Clear();
+        DupStatus.Text = "";
+        SetDupBusy(true);
+
+        var progress = new Progress<DupProgress>(p =>
+        {
+            if (p.FilesTotal > 0)
+            {
+                if (DupProgressBar.IsIndeterminate)
+                {
+                    DupProgressBar.IsIndeterminate = false;
+                    DupProgressBar.Minimum = 0;
+                    DupProgressBar.Maximum = p.FilesTotal;
+                }
+                DupProgressBar.Value = p.FilesDone;
+                DupProgressText.Text = $"{p.Stage}  {p.FilesDone:N0} / {p.FilesTotal:N0}";
+            }
+            else
+            {
+                DupProgressText.Text = p.Stage;
+            }
+        });
+
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var groups = await Task.Run(() => DuplicateFinder.Find(drive.Path, progress, ct, minSize), ct);
+            sw.Stop();
+
+            var groupNo = 0;
+            var wasted = 0L;
+            var totalFiles = 0;
+            foreach (var group in groups)
+            {
+                groupNo++;
+                wasted += group.WastedBytes;
+                foreach (var file in group.Files)
+                {
+                    totalFiles++;
+                    _dupRows.Add(new DupRow
+                    {
+                        GroupText = $"#{groupNo} · {group.Files.Count} 个",
+                        Name = file.Name,
+                        Folder = file.Directory ?? "",
+                        FullPath = file.Path,
+                        Size = file.Size,
+                        Note = IsSystemPath(file.Path) ? "系统文件" : "",
+                    });
+                }
+            }
+
+            if (groups.Count == 0)
+            {
+                DupStatus.Text = $"没找到重复文件（只看大于 {minLabel} 的）。";
+                DupProgressText.Text = "没有发现重复";
+            }
+            else
+            {
+                DupStatus.Text =
+                    $"找到 {groups.Count:N0} 组重复、共 {totalFiles:N0} 个文件，" +
+                    $"每组只留 1 个能省 {FormatSize(wasted)}，检查耗时 {sw.Elapsed.TotalSeconds:F1} 秒。" +
+                    "标着「系统文件」的是程序自带的多份拷贝，不建议删。";
+                DupProgressText.Text = "双击一行可以在资源管理器中定位。";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            DupStatus.Text = "已取消。";
+        }
+        catch (Exception ex)
+        {
+            DupStatus.Text = "查找失败：" + ex.Message;
+        }
+        finally
+        {
+            SetDupBusy(false);
+        }
+    }
+
+    private void DupCancelButton_Click(object sender, RoutedEventArgs e) => _dupCts?.Cancel();
+
+    private void DupGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (DupGrid.SelectedItem is not DupRow row) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{row.FullPath}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "无法打开所在文件夹",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void SetDupBusy(bool busy)
+    {
+        DupScanButton.IsEnabled = !busy;
+        DupCancelButton.IsEnabled = busy;
+        DupMinSizeCombo.IsEnabled = !busy;
+        DupProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        if (busy)
+        {
+            DupProgressBar.IsIndeterminate = true;
+            DupProgressText.Text = "正在查找…";
+        }
+    }
+
+    /// <summary>系统目录里的重复文件大多是程序自带的多份拷贝，标出来提醒别乱删。</summary>
+    private static bool IsSystemPath(string path)
+    {
+        static bool Under(string dir, string p) =>
+            !string.IsNullOrEmpty(dir) && p.StartsWith(dir + "\\", StringComparison.OrdinalIgnoreCase);
+
+        return Under(Environment.GetFolderPath(Environment.SpecialFolder.Windows), path)
+            || Under(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), path)
+            || Under(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), path);
     }
 
     // ================= 树图 =================
@@ -506,6 +655,27 @@ public sealed class BigFileRow
     public long Size { get; init; }
 
     public string SizeText => MainWindow.FormatSize(Size);
+}
+
+/// <summary>重复文件页的一行。</summary>
+public sealed class DupRow
+{
+    public required string GroupText { get; init; }
+    public required string Name { get; init; }
+    public required string Folder { get; init; }
+    public required string FullPath { get; init; }
+    public long Size { get; init; }
+    public string Note { get; init; } = "";
+
+    public string SizeText => MainWindow.FormatSize(Size);
+}
+
+/// <summary>「只看大于」下拉框的选项。</summary>
+public sealed class SizeOption
+{
+    public required string Label { get; init; }
+    public long Bytes { get; init; }
+    public override string ToString() => Label;
 }
 
 /// <summary>清理页的一行，IsChecked 变化时通知父窗口更新合计。</summary>
