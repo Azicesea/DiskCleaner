@@ -47,7 +47,9 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="扫描目标" VerticalAlignment="Center" Foreground="#555" Margin="0,0,10,0" />
                             <ComboBox x:Name="DriveCombo" Width="280" Height="32" VerticalContentAlignment="Center" />
-                            <Button x:Name="ScanButton" Content="开始扫描" Width="100" Margin="10,0,0,0"
+                            <Button x:Name="PickFolderButton" Content="选文件夹…" Width="96" Margin="10,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="PickFolderButton_Click" />
+                            <Button x:Name="ScanButton" Content="开始扫描" Width="100" Margin="8,0,0,0"
                                     Style="{StaticResource PrimaryButton}" Click="ScanButton_Click" />
                             <Button x:Name="CancelButton" Content="取消" Width="70" Margin="8,0,0,0"
                                     Style="{StaticResource PlainButton}" Click="CancelButton_Click" IsEnabled="False" />
@@ -209,6 +211,70 @@
             </Grid>
         </TabItem>
 
+        <!-- ============ 关键词查找 ============ -->
+        <TabItem Header="关键词">
+            <Grid Margin="4,10,4,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12" Margin="0,0,0,10">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="查找位置" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#555" />
+                            <ComboBox x:Name="FindRootCombo" Width="280" Height="30" VerticalContentAlignment="Center" />
+                            <Button x:Name="FindPickFolderButton" Content="选文件夹…" Width="96" Margin="8,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="FindPickFolderButton_Click" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="关键词" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#555" />
+                            <TextBox x:Name="KeywordBox" Width="260" Height="30" VerticalContentAlignment="Center"
+                                     Padding="6,0" KeyDown="KeywordBox_KeyDown" />
+                            <Button x:Name="FindButton" Content="查找" Width="100" Margin="8,0,0,0"
+                                    Style="{StaticResource PrimaryButton}" Click="FindButton_Click" />
+                            <Button x:Name="FindCancelButton" Content="取消" Width="70" Margin="8,0,0,0"
+                                    Style="{StaticResource PlainButton}" Click="FindCancelButton_Click" IsEnabled="False" />
+                            <TextBlock Text="只看大于" VerticalAlignment="Center" Margin="18,0,6,0" Foreground="#555" />
+                            <ComboBox x:Name="FindMinSizeCombo" Width="110" Height="30" VerticalContentAlignment="Center" />
+                            <TextBlock Text="的文件" VerticalAlignment="Center" Margin="6,0,0,0" Foreground="#555" />
+                        </StackPanel>
+                        <TextBlock x:Name="FindProgressText" Foreground="#666" Margin="2,8,0,0" TextWrapping="Wrap"
+                                   Text="输入关键词，会在文件名和完整路径里找。比如「临时文件」会同时匹配 Temp 目录和 .tmp 文件。" />
+                        <ProgressBar x:Name="FindProgressBar" Height="6" Margin="0,8,0,0" Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Row="2" Background="White" CornerRadius="8" Padding="8">
+                    <DataGrid x:Name="FindGrid"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal"
+                              HorizontalGridLinesBrush="#EEF0F3"
+                              BorderThickness="0"
+                              RowHeight="30"
+                              FontSize="13"
+                              AlternatingRowBackground="#FAFBFC"
+                              AlternationCount="2"
+                              MouseDoubleClick="FindGrid_MouseDoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="大小" Binding="{Binding SizeText}" Width="100" />
+                            <DataGridTextColumn Header="修改时间" Binding="{Binding ModifiedText}" Width="140" />
+                            <DataGridTextColumn Header="文件名" Binding="{Binding Name}" Width="2*" />
+                            <DataGridTextColumn Header="所在文件夹" Binding="{Binding Folder}" Width="3*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <TextBlock x:Name="FindStatus" Grid.Row="3" Margin="4,8,0,0" Foreground="#888"
+                           Text="还没有查找过" />
+            </Grid>
+        </TabItem>
+
         <!-- ============ 清理 ============ -->
         <TabItem Header="清理">
             <Grid Margin="4,10,4,4">
@@ -225,8 +291,6 @@
                                     Style="{StaticResource PrimaryButton}" Click="CleanScanButton_Click" />
                             <Button x:Name="CleanRunButton" Content="清理选中项" Width="120" Margin="10,0,0,0"
                                     Style="{StaticResource PlainButton}" Click="CleanRunButton_Click" IsEnabled="False" />
-                            <Button x:Name="CustomRulesButton" Content="自定义规则…" Width="110" Margin="8,0,0,0"
-                                    Style="{StaticResource PlainButton}" Click="CustomRulesButton_Click" />
                             <CheckBox x:Name="RecycleCheck" Content="删掉的文件放进回收站（可还原）"
                                       VerticalAlignment="Center" Margin="16,0,0,0" />
                             <TextBlock x:Name="CleanHint" Text="" VerticalAlignment="Center"

@@ -147,6 +147,29 @@ if (mode == "dup")
     return;
 }
 
+if (mode == "find")
+{
+    var findRoot = args.Length > 1 ? args[1] : @"E:\";
+    var query = args.Length > 2 ? args[2] : "临时文件";
+    Console.WriteLine($"查找: {query}   位置: {findRoot}");
+    Console.WriteLine();
+
+    var sw = Stopwatch.StartNew();
+    var hits = DiskCleaner.Core.Find.KeywordFinder.Find(
+        findRoot,
+        query,
+        progress: new Progress<DiskCleaner.Core.Find.KeywordProgress>(p =>
+            Console.WriteLine($"  {p.FilesSeen:N0} 文件, 命中 {p.Hits:N0}")));
+    sw.Stop();
+
+    var totalBytes = hits.Sum(h => h.Size);
+    Console.WriteLine();
+    Console.WriteLine($"命中 {hits.Count:N0} 个文件, 合计 {totalBytes / 1073741824.0:F2} GB, 耗时 {sw.Elapsed.TotalSeconds:F1} 秒");
+    foreach (var h in hits.Take(15))
+        Console.WriteLine($"  {h.Size / 1048576.0,9:F1} MB  {h.Path}");
+    return;
+}
+
 var target = args.Length > 0 ? args[0] : @"E:\";
 Console.WriteLine($"扫描: {target}");
 

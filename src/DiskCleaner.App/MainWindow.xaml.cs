@@ -10,6 +10,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using DiskCleaner.Core.Clean;
 using DiskCleaner.Core.Dup;
+using DiskCleaner.Core.Find;
 using DiskCleaner.Core.Models;
 using DiskCleaner.Core.Scan;
 
@@ -21,9 +22,10 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<CleanRow> _cleanRows = new();
     private readonly ObservableCollection<BigFileRow> _bigRows = new();
     private readonly ObservableCollection<DupRow> _dupRows = new();
+    private readonly ObservableCollection<FindRow> _findRows = new();
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _dupCts;
-    private List<CleanRule> _customRules = CustomRuleStore.Load();
+    private CancellationTokenSource? _findCts;
 
     private DirNode? _treemapRoot;
     private readonly List<DirNode> _treemapStack = new();
@@ -35,10 +37,16 @@ public partial class MainWindow : Window
         CleanList.ItemsSource = _cleanRows;
         BigFileGrid.ItemsSource = _bigRows;
         DupGrid.ItemsSource = _dupRows;
+        FindGrid.ItemsSource = _findRows;
         DupMinSizeCombo.Items.Add(new SizeOption { Label = "1 MB", Bytes = 1024L * 1024 });
         DupMinSizeCombo.Items.Add(new SizeOption { Label = "10 MB", Bytes = 10L * 1024 * 1024 });
         DupMinSizeCombo.Items.Add(new SizeOption { Label = "100 MB", Bytes = 100L * 1024 * 1024 });
         DupMinSizeCombo.SelectedIndex = 0;
+        FindMinSizeCombo.Items.Add(new SizeOption { Label = "不限", Bytes = 0 });
+        FindMinSizeCombo.Items.Add(new SizeOption { Label = "1 MB", Bytes = 1024L * 1024 });
+        FindMinSizeCombo.Items.Add(new SizeOption { Label = "10 MB", Bytes = 10L * 1024 * 1024 });
+        FindMinSizeCombo.Items.Add(new SizeOption { Label = "100 MB", Bytes = 100L * 1024 * 1024 });
+        FindMinSizeCombo.SelectedIndex = 0;
         Loaded += MainWindow_Loaded;
     }
 
@@ -46,6 +54,7 @@ public partial class MainWindow : Window
     {
         FillDriveCombo(DriveCombo);
         FillDriveCombo(DupDriveCombo);
+        FillDriveCombo(FindRootCombo);
     }
 
     /// <summary>把本机的固定磁盘填进下拉框，默认选第一个。</summary>
@@ -75,7 +84,35 @@ public partial class MainWindow : Window
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
         if (DriveCombo.SelectedItem is not DriveItem drive) return;
+        await ScanRootAsync(drive.Path);
+    }
 
+    /// <summary>选一个具体文件夹来扫描，不用从盘根开始。</summary>
+    private async void PickFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择要查看的文件夹",
+            Multiselect = false,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        // 下拉框跟着显示当前看的目录，免得和实际扫描位置对不上
+        for (var i = DriveCombo.Items.Count - 1; i >= 0; i--)
+        {
+            if (DriveCombo.Items[i] is DriveItem d && !IsDriveRoot(d.Path))
+                DriveCombo.Items.RemoveAt(i);
+        }
+        DriveCombo.Items.Insert(0, new DriveItem { Path = dialog.FolderName, Label = dialog.FolderName });
+        DriveCombo.SelectedIndex = 0;
+
+        await ScanRootAsync(dialog.FolderName);
+    }
+
+    private static bool IsDriveRoot(string path) => path.Length == 3 && path[1] == ':' && path[2] == '\\';
+
+    private async Task ScanRootAsync(string rootPath)
+    {
         _cts = new CancellationTokenSource();
         SetBusy(true);
         _rows.Clear();
@@ -91,7 +128,7 @@ public partial class MainWindow : Window
         try
         {
             var result = await Task.Run(
-                () => DiskScanner.Scan(drive.Path, progress, _cts.Token));
+                () => DiskScanner.Scan(rootPath, progress, _cts.Token));
 
             FillRows(result);
             FillBigFiles(result);
@@ -99,7 +136,7 @@ public partial class MainWindow : Window
             _treemapStack.Clear();
             if (ViewMapRadio.IsChecked == true) RenderTreemap();
             StatusText.Text =
-                $"扫描完成：{result.FilesSeen:N0} 个文件，共 {FormatSize(result.BytesSeen)}，" +
+                $"{rootPath} 扫描完成：{result.FilesSeen:N0} 个文件，共 {FormatSize(result.BytesSeen)}，" +
                 $"耗时 {(result.ElapsedMs / 1000.0):F1} 秒" +
                 (result.InaccessibleDirs > 0 ? $"，跳过 {result.InaccessibleDirs} 个无权限目录" : "");
             ProgressText.Text = "扫描完成";
@@ -159,6 +196,7 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = !busy;
         CancelButton.IsEnabled = busy;
         DriveCombo.IsEnabled = !busy;
+        PickFolderButton.IsEnabled = !busy;
         ScanProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         ScanProgressBar.IsIndeterminate = busy;
     }
@@ -462,6 +500,141 @@ public partial class MainWindow : Window
 
     private static Brush BlockBrush(int index) => BlockBrushes[index % BlockBrushes.Length];
 
+    // ================= 关键词 =================
+
+    private void FindPickFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择要查找的文件夹" };
+        if (dialog.ShowDialog(this) != true || string.IsNullOrWhiteSpace(dialog.FolderName)) return;
+
+        var path = dialog.FolderName;
+        // 同一个文件夹不要重复加
+        for (var i = FindRootCombo.Items.Count - 1; i >= 0; i--)
+        {
+            if (FindRootCombo.Items[i] is DriveItem d && string.Equals(d.Path, path, StringComparison.OrdinalIgnoreCase))
+                FindRootCombo.Items.RemoveAt(i);
+        }
+        FindRootCombo.Items.Insert(0, new DriveItem { Path = path, Label = path });
+        FindRootCombo.SelectedIndex = 0;
+    }
+
+    private void KeywordBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) FindButton_Click(sender, e);
+    }
+
+    private async void FindButton_Click(object sender, RoutedEventArgs e)
+    {
+        var root = (FindRootCombo.SelectedItem as DriveItem)?.Path;
+        if (root is null)
+        {
+            MessageBox.Show(this, "先选一个要查找的位置。", "关键词查找", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var keyword = KeywordBox.Text.Trim();
+        if (keyword.Length == 0)
+        {
+            MessageBox.Show(this, "先输入要查找的关键词。", "关键词查找", MessageBoxButton.OK, MessageBoxImage.Information);
+            KeywordBox.Focus();
+            return;
+        }
+
+        var minBytes = (FindMinSizeCombo.SelectedItem as SizeOption)?.Bytes ?? 0;
+
+        _findCts = new CancellationTokenSource();
+        _findRows.Clear();
+        SetFindBusy(true);
+        FindStatus.Text = "";
+        FindProgressText.Text = "正在查找…";
+
+        var progress = new Progress<KeywordProgress>(p =>
+        {
+            FindProgressText.Text = $"已看 {p.FilesSeen:N0} 个文件，命中 {p.Hits:N0} 个…";
+        });
+
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var hits = await Task.Run(
+                () => KeywordFinder.Find(root, keyword, KeywordFinder.DefaultMaxResults, progress, _findCts.Token),
+                _findCts.Token);
+            sw.Stop();
+
+            var shown = minBytes > 0 ? hits.Where(h => h.Size >= minBytes).ToList() : hits.ToList();
+            foreach (var h in shown)
+            {
+                _findRows.Add(new FindRow
+                {
+                    Name = h.Name,
+                    Folder = h.Directory ?? "",
+                    FullPath = h.Path,
+                    Size = h.Size,
+                    Modified = h.Modified,
+                });
+            }
+
+            FindProgressText.Text = "查找完成";
+            if (hits.Count == 0)
+            {
+                FindStatus.Text = $"{root} 下没找到和「{keyword}」有关的文件。";
+            }
+            else
+            {
+                var total = shown.Sum(h => h.Size);
+                var skipped = hits.Count - shown.Count;
+                FindStatus.Text = $"{root} 找到 {hits.Count:N0} 个和「{keyword}」有关的文件"
+                                  + (skipped > 0 ? $"（按大小筛掉 {skipped:N0} 个，列表里 {shown.Count:N0} 个）" : "")
+                                  + $"，列表合计 {FormatSize(total)}，耗时 {sw.Elapsed.TotalSeconds:F1} 秒"
+                                  + (hits.Count >= KeywordFinder.DefaultMaxResults ? "。已到 5000 条上限，换个更具体的关键词或缩小位置能更全。" : "");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            FindStatus.Text = "已取消";
+            FindProgressText.Text = "";
+        }
+        catch (Exception ex)
+        {
+            FindStatus.Text = "查找失败";
+            FindProgressText.Text = "";
+            MessageBox.Show(this, ex.Message, "查找失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _findCts.Dispose();
+            _findCts = null;
+            SetFindBusy(false);
+        }
+    }
+
+    private void FindCancelButton_Click(object sender, RoutedEventArgs e) => _findCts?.Cancel();
+
+    private void FindGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (FindGrid.SelectedItem is not FindRow row) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{row.FullPath}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "打不开", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void SetFindBusy(bool busy)
+    {
+        FindButton.IsEnabled = !busy;
+        FindCancelButton.IsEnabled = busy;
+        FindPickFolderButton.IsEnabled = !busy;
+        FindRootCombo.IsEnabled = !busy;
+        KeywordBox.IsEnabled = !busy;
+        FindMinSizeCombo.IsEnabled = !busy;
+        FindProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        FindProgressBar.IsIndeterminate = busy;
+    }
+
     // ================= 清理 =================
 
     private async void CleanScanButton_Click(object sender, RoutedEventArgs e)
@@ -498,50 +671,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void CustomRulesButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var win = new CustomRulesWindow(_customRules) { Owner = this };
-            win.ShowDialog();
-            _customRules = win.Rules.ToList();
-        }
-        catch (Exception)
-        {
-            return;
-        }
-
-        // 规则改了，直接重扫一遍，免得用户看着旧列表
-        _cts = new CancellationTokenSource();
-        SetCleanBusy(true);
-        _cleanRows.Clear();
-        CleanStatusText.Text = "规则变了，正在重新扫描…";
-        try
-        {
-            await ReloadCleanItemsAsync(_cts.Token);
-            var ready = _cleanRows.Where(r => r.Item.CanClean).ToList();
-            CleanStatusText.Text = ready.Count == 0
-                ? "没有找到可清理的内容"
-                : $"扫描完成：{ready.Count} 项可清理，共 {FormatSize(ready.Sum(r => r.Size))}";
-        }
-        catch (OperationCanceledException)
-        {
-            CleanStatusText.Text = "已取消";
-        }
-        catch (Exception ex)
-        {
-            CleanStatusText.Text = "扫描失败";
-            MessageBox.Show(this, ex.Message, "扫描失败", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            _cts.Dispose();
-            _cts = null;
-            SetCleanBusy(false);
-            UpdateCleanSummary();
-        }
-    }
-
     private async Task ReloadCleanItemsAsync(CancellationToken ct)
     {
         var progress = new Progress<CleanScanProgress>(p =>
@@ -550,7 +679,7 @@ public partial class MainWindow : Window
                 CleanStatusText.Text = $"正在扫描：{p.CurrentRule}（{p.Done + 1}/{p.Total}）";
         });
 
-        var rules = AllCleanRules();
+        var rules = DefaultRules.All;
         var items = await Task.Run(() => CleanScanner.Scan(rules, progress, ct), ct);
         var previouslyChecked = _cleanRows
             .Where(r => r.IsChecked)
@@ -569,25 +698,12 @@ public partial class MainWindow : Window
                 Rule = rule,
                 IsChecked = hadRows
                     ? previouslyChecked.Contains(item.RuleId)
-                    : DefaultCheckedFor(rule),
+                    : DefaultRules.DefaultChecked(rule),
             };
             row.PropertyChanged += (_, _) => UpdateCleanSummary();
             _cleanRows.Add(row);
         }
     }
-
-    /// <summary>内置规则 + 用户自定义规则。扫描和清理都必须用同一份，否则 Id 对不上。</summary>
-    private IReadOnlyList<CleanRule> AllCleanRules()
-    {
-        if (_customRules.Count == 0) return DefaultRules.All;
-        var list = new List<CleanRule>(DefaultRules.All);
-        list.AddRange(_customRules);
-        return list;
-    }
-
-    /// <summary>自定义规则是用户自己加的，默认勾上；回收站依旧不默认勾。</summary>
-    private static bool DefaultCheckedFor(CleanRule rule) =>
-        rule.Id.StartsWith("custom-", StringComparison.Ordinal) || DefaultRules.DefaultChecked(rule);
 
     private async void CleanRunButton_Click(object sender, RoutedEventArgs e)
     {
@@ -629,7 +745,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var rules = AllCleanRules();
+            var rules = DefaultRules.All;
             var result = await Task.Run(() => CleanExecutor.Execute(
                 rules, ids, progress, _cts.Token, forceRecycleBin: toRecycle));
 
@@ -739,9 +855,21 @@ public sealed class DupRow
     public string SizeText => MainWindow.FormatSize(Size);
 }
 
-/// <summary>「只看大于」下拉框的选项。</summary>
-public sealed class SizeOption
+/// <summary>关键词查找结果的一行。</summary>
+public sealed class FindRow
 {
+    public required string Name { get; init; }
+    public required string Folder { get; init; }
+    public required string FullPath { get; init; }
+    public long Size { get; init; }
+    public DateTime Modified { get; init; }
+
+    public string SizeText => MainWindow.FormatSize(Size);
+    public string ModifiedText => Modified.ToString("yyyy-MM-dd HH:mm");
+}
+
+/// <summary>「只看大于」下拉框的选项。</summary>
+public sealed class SizeOption{
     public required string Label { get; init; }
     public long Bytes { get; init; }
     public override string ToString() => Label;
