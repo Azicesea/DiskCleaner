@@ -5,3 +5,6 @@ tmp/
 .vs/
 *.user
 *.suo
+publish/
+*.exe
+

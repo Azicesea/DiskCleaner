@@ -78,6 +78,18 @@ dotnet build DiskCleaner.sln -c Release
 src/DiskCleaner.App/bin/Release/net8.0-windows/DiskCleaner.App.exe
 ```
 
+## 打包成单文件
+
+想让软件在没装 .NET 的电脑上直接双击运行，可以打成自包含单文件：
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/publish.ps1
+```
+
+产物是 `publish/DiskCleaner.App.exe`，一个文件约 68 MB，运行时已经打包在里面。拷到任何 Windows 10 / 11 x64 上双击即可使用。
+
+单文件版第一次启动会稍慢（要把自己解压到临时目录），之后就正常了。
+
 ## 项目结构
 
 ```
